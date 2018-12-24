@@ -39,8 +39,14 @@ class Pix2PixModel(BaseModel):
 
         if self.isTrain:
             use_sigmoid = opt.no_lsgan
-            self.netD = networks.define_D(opt.input_nc + opt.output_nc, opt.ndf, opt.netD,
-                                          opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, opt.init_gain, self.gpu_ids)
+            if opt.conditioned:
+                self.netD = networks.define_D(opt.input_nc + opt.output_nc, opt.ndf, opt.netD,
+                                              opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, opt.init_gain, self.gpu_ids)
+            else:
+                # unconditional discriminator
+                self.netD = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
+                                              opt.n_layers_D, opt.norm, use_sigmoid, opt.init_type, opt.init_gain,
+                                              self.gpu_ids)
 
         if self.isTrain:
             self.fake_AB_pool = ImagePool(opt.pool_size)
@@ -66,28 +72,42 @@ class Pix2PixModel(BaseModel):
     def forward(self):
         self.fake_B = self.netG(self.real_A)
 
-    def backward_D(self):
-        # Fake
-        # stop backprop to the generator by detaching fake_B
-        fake_AB = self.fake_AB_pool.query(torch.cat((self.real_A, self.fake_B), 1))
-        pred_fake = self.netD(fake_AB.detach())
-        self.loss_D_fake = self.criterionGAN(pred_fake, False)
-
-        # Real
-        real_AB = torch.cat((self.real_A, self.real_B), 1)
-        pred_real = self.netD(real_AB)
-        self.loss_D_real = self.criterionGAN(pred_real, True)
+    def backward_D(self, opt):
+        if opt.conditioned:
+            #conditioned fake
+            # stop backprop to the generator by detaching fake_B
+            fake_AB = self.fake_AB_pool.query(torch.cat((self.real_A, self.fake_B), 1))
+            pred_fake = self.netD(fake_AB.detach())
+            self.loss_D_fake = self.criterionGAN(pred_fake, False)
+            # Real
+            real_AB = torch.cat((self.real_A, self.real_B), 1)
+            pred_real = self.netD(real_AB)
+            self.loss_D_real = self.criterionGAN(pred_real, True)
+        else:
+            #unconditioned fake
+            fake_B = self.fake_AB_pool.query(self.fake_B)
+            pred_fake = self.netD(fake_B.detach())
+            self.loss_D_fake = self.criterionGAN(pred_fake, False)
+            #unconditioned real
+            pred_real = self.netD(self.real_B)
+            self.loss_D_real = self.criterionGAN(pred_real, True)
 
         # Combined loss
         self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
 
         self.loss_D.backward()
 
-    def backward_G(self):
-        # First, G(A) should fake the discriminator
-        fake_AB = torch.cat((self.real_A, self.fake_B), 1)
-        pred_fake = self.netD(fake_AB)
-        self.loss_G_GAN = self.criterionGAN(pred_fake, True)
+    def backward_G(self, opt):
+        if opt.conditioned:
+            # First, G(A) should fake the discriminator
+            fake_AB = torch.cat((self.real_A, self.fake_B), 1)
+            pred_fake = self.netD(fake_AB)
+            # We hope G can fool D , i.e. minimize GAN loss when label is True
+            self.loss_G_GAN = self.criterionGAN(pred_fake, True)
+        else:
+            #unconditioned
+            pred_fake = self.netD(self.fake_B)
+            self.loss_G_GAN = self.criterionGAN(pred_fake, True)
 
         # Second, G(A) = B
         self.loss_G_L1 = self.criterionL1(self.fake_B, self.real_B) * self.opt.lambda_L1
@@ -96,16 +116,16 @@ class Pix2PixModel(BaseModel):
 
         self.loss_G.backward()
 
-    def optimize_parameters(self):
+    def optimize_parameters(self, opt):
         self.forward()
         # update D
         self.set_requires_grad(self.netD, True)
         self.optimizer_D.zero_grad()
-        self.backward_D()
+        self.backward_D(opt)
         self.optimizer_D.step()
 
         # update G
         self.set_requires_grad(self.netD, False)
         self.optimizer_G.zero_grad()
-        self.backward_G()
+        self.backward_G(opt)
         self.optimizer_G.step()
