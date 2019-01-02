@@ -79,4 +79,4 @@ class PairedDataset(BaseDataset):
         return len(self.A_paths)
 
     def name(self):
-        return 'AlignedDataset'
+        return 'PairedDataset'

@@ -20,6 +20,8 @@ class ImagePool():
                 self.images.append(image)
                 return_images.append(image)
             else:
+                # if the number of images in the pool > 0, then return the image or randomly
+                # select a image originally in the pool.
                 p = random.uniform(0, 1)
                 if p > 0.5:
                     random_id = random.randint(0, self.pool_size - 1)  # randint is inclusive

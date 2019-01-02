@@ -133,7 +133,7 @@ class CycleGANModel(BaseModel):
         self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B
         self.loss_G.backward()
 
-    def optimize_parameters(self, opt):
+    def optimize_parameters(self):
         # forward
         self.forward()
         # G_A and G_B
